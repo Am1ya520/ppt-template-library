@@ -69,10 +69,20 @@ def main(argv=None) -> int:
     ap.add_argument("-o", "--out", default="pack")
     ap.add_argument("--zip", action="store_true", help="also write <out>.zip")
     ap.add_argument("--list", action="store_true", help="only print the selection")
+    ap.add_argument("--ids", help="comma-separated deck ids (overrides the automatic pick)")
     args = ap.parse_args(argv)
 
     lib = library_root(args.library)
-    chosen = pick(lib, args.count, args.per_family, args.min_readable)
+    if args.ids:
+        wanted = [i.strip() for i in args.ids.split(",") if i.strip()]
+        chosen = pick(lib, 10**6, 10**6, 0)
+        by_id = {r["id"]: r for r in chosen}
+        missing = [i for i in wanted if i not in by_id]
+        if missing:
+            print("not in this library: " + ", ".join(missing))
+        chosen = [by_id[i] for i in wanted if i in by_id]
+    else:
+        chosen = pick(lib, args.count, args.per_family, args.min_readable)
     if not chosen:
         print("nothing qualifies; lower --min-readable or import more templates")
         return 1

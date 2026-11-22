@@ -108,6 +108,15 @@ python pptl.py fill "library/deck02/source.pptx" plan.json -o out/demo.pptx
 
 ## 想把模板也发出去
 
+一条命令（需要能访问 GitHub 的网络）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\publish.ps1
+```
+
+细看 [tools/RELEASE-HOWTO.md](tools/RELEASE-HOWTO.md)（含"机器连不上 GitHub"的退路）。手动做法：
+
+
 ```bash
 python tools/make_starter_pack.py --list                 # 看看会挑哪几套（按可改页排序，同色系限量）
 python tools/make_starter_pack.py -n 24 -o pack --zip    # 复制成 pack/ 并打包 zip
