@@ -159,12 +159,12 @@ python tools/make_starter_pack.py -n 24 -o pack --zip    # 复制成 pack/ 并�
 ```
 pptl.py                 引擎（index / slots / fill / library）
 tools/import_decks.py   模板入库 + 目录重建
-tools/export_manifest.py 导出 manifest.json（只含元数据，可提交进 git）
+tools/export_manifest.py 导出 manifest.json（只含元数据，不含模板文件）
 tools/make_starter_pack.py 挑精选模板打包（GitHub Release 用）
 SKILL.md                DeepSeek Harness 技能定义
 docs/plan-schema.md     plan.json 字段说明
 examples/plan-demo.json 可直接跑的示例
-manifest.json           模板库清单（可选，向你自己的库导出）
+manifest.json           **Release 那 28 套包的清单**（862 页 / 750 可改页）：包里有哪套、各多少页、哪些页能放正文。你自己的库用 tools/export_manifest.py 另导一份
 library/                你的模板库（.gitignore，不入库）
 ```
 
