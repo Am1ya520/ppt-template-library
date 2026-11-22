@@ -106,12 +106,23 @@ python pptl.py fill "library/deck02/source.pptx" plan.json -o out/demo.pptx
 | 拥挤/强制放置 | 短句进矮框不算挤；整页候选全挤时强制放置——宁可紧一点，也不交空白页 |
 | `strip_effects()` | 保存前清掉 `p:transition`、`p:timing`、音频视频关系：产出无切换无声音 |
 
+## 想把模板也发出去
+
+```bash
+python tools/make_starter_pack.py --list                 # 看看会挑哪几套（按可改页排序，同色系限量）
+python tools/make_starter_pack.py -n 24 -o pack --zip    # 复制成 pack/ 并打包 zip
+```
+
+选出来的是"最能放正文"的那几套，并且限制了同色系套数，不会变成 24 份一个风格。
+**发布前先读 [PUBLISH.md](PUBLISH.md) 的版权一节**——第三方商业模板不适合公开再分发。
+
 ## 目录结构
 
 ```
 pptl.py                 引擎（index / slots / fill / library）
 tools/import_decks.py   模板入库 + 目录重建
 tools/export_manifest.py 导出 manifest.json（只含元数据，可提交进 git）
+tools/make_starter_pack.py 挑精选模板打包（GitHub Release 用）
 SKILL.md                DeepSeek Harness 技能定义
 docs/plan-schema.md     plan.json 字段说明
 examples/plan-demo.json 可直接跑的示例
