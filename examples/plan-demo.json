@@ -1,0 +1,9 @@
+{
+  "year": "2026",
+  "pages": [
+    {"type": "cover",  "source_slide": 1,  "title": "智能仓储解决方案", "body": ["产品中心 · 2026 年 3 月"]},
+    {"type": "toc",    "source_slide": 2,  "title": "目录", "body": ["行业现状与痛点", "总体架构", "试点收益与节奏"]},
+    {"type": "dense",  "source_slide": 12, "title": "总体架构", "body": ["感知层：货架电子标签与库位相机，10 秒级刷新。", "执行层：AMR 与提升机联动，按波次自动调度。", "决策层：库存与订单实时对齐，缺货自动预警。"]},
+    {"type": "ending", "source_slide": 31, "title": "谢谢", "body": ["产品中心"]}
+  ]
+}

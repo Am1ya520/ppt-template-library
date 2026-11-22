@@ -1,0 +1,141 @@
+# ppt-template-library
+
+**用你自己的 PPT 模板出稿，而不是让 AI 从白纸画版式。**
+
+给 [DeepSeek Harness](https://github.com/deepseek-ai) 用的技能 + 独立 CLI：它把你硬盘里的一堆 `.pptx` 模板编成索引，
+出稿时**复制模板原有的页面、只替换文字、删掉没用到的页**——所以成品看起来就是那套模板做的，没有"AI 味儿"。
+
+- 引擎只依赖 `python-pptx`，单文件 `pptl.py`
+- 一份 deck 只用一套模板（混用会立刻回到 AI 感）
+- 产出一律**没有切换动画、没有声音**
+- 附带一个索引/套壳工具链：`index`（逐页槽位）→ `fill`（套内容）→ `catalog`（库总表）
+
+> 本仓库不含任何模板文件。模板是你自己的资产，通过 `tools/import_decks.py` 从本地目录入库；
+> 想把模板也分发出去，见 [PUBLISH.md](PUBLISH.md)。
+
+## 它解决什么问题
+
+| 常见做法 | 结果 |
+| --- | --- |
+| 让 AI 用 python-pptx 从空白页画矩形/圆形 | 版式简单、颜色一套模板味，一眼 AI |
+| 让 AI 生成 HTML/图片式的"设计稿" | 看着花，但不是能改的 PPT |
+| **复制模板真实页面，只换字**（本仓库） | 和模板原样一致，客户/评委看不出是生成的 |
+
+## 安装
+
+```bash
+git clone https://github.com/<you>/ppt-template-library.git
+cd ppt-template-library
+pip install python-pptx          # 唯一依赖
+```
+
+### 作为 DeepSeek Harness 技能使用
+
+把仓库（或其中的 `SKILL.md`）放到 DSH 的 skills 目录，之后任何对话里提到"做 PPT / 幻灯片 / 汇报"就会自动加载：
+
+```bash
+# Windows
+xcopy /E /I ppt-template-library "%USERPROFILE%\.dsh\skills\ppt-template-library"
+# macOS / Linux
+cp -r ppt-template-library ~/.dsh/skills/ppt-template-library
+```
+
+### 作为普通 CLI 使用
+
+```bash
+python pptl.py --help
+```
+
+## 一、把模板入库
+
+```bash
+python tools/import_decks.py "D:/我的模板"                 # 目录（递归）或单个文件，可多个
+python tools/import_decks.py "D:/模板A" "D:/模板B.pptx" --scenario 汇报
+```
+
+- 自动去重：`文件大小 + 首尾 1MB 的 sha1`（**不整份读**，几 GB 的库也快）
+- 自动跳过 `~$` 临时文件和不足 5 页的空文档
+- 每套落成 `library/deckNN/{source.pptx, index.json, meta.json}`，并重写 `library/catalog.md`
+
+看库：
+
+```bash
+python pptl.py library              # 按"可改页"排序
+cat library/catalog.md              # 总表：页数 / 可改页 / 各类页数量 / 可填充度
+```
+
+## 二、出稿
+
+写一份 `plan.json`：
+
+```json
+{
+  "year": "2026",
+  "pages": [
+    {"type": "cover",   "source_slide": 1,  "title": "智能仓储解决方案", "body": ["产品中心 · 2026 年 3 月"]},
+    {"type": "toc",     "source_slide": 2,  "title": "目录", "body": ["行业现状与痛点", "总体架构", "试点节奏"]},
+    {"type": "dense",   "source_slide": 12, "title": "总体架构", "body": ["感知层：…", "执行层：…", "决策层：…"]},
+    {"type": "ending",  "source_slide": 31, "title": "谢谢", "body": ["产品中心"]}
+  ]
+}
+```
+
+```bash
+python pptl.py fill "library/deck02/source.pptx" plan.json -o out/demo.pptx
+```
+
+- `type` ∈ `cover / toc / chapter / content / dense / ending`
+- 不给 `source_slide` 时按类型自动挑页（优先 `meta.json` 的 `readable_pages`）
+- 想精确钉到某个形状：`"slots": {"<形状 id>": "文字"}`，形状 id 用 `pptl.py slots <pptx> --slide N` 查
+- 字段细节见 [docs/plan-schema.md](docs/plan-schema.md)
+
+**出稿后一定渲染逐页检查**（LibreOffice / PowerPoint / 任何转图工具都行）。文字溢出、空卡片这类问题只有看图才能发现。
+
+## 三、引擎做了什么
+
+`pptl.py` 的核心不是"排版"，而是**判断模板上哪个框是什么角色**，然后把字准确地放进去：
+
+| 机制 | 作用 |
+| --- | --- |
+| `classify()` | 把每个文字框分成 `headline / text / year / num / design / furniture / filler / empty / rotated` |
+| `furniture` | `目录 / CONTENTS / 谢谢 / THANK YOU / MANY THANKS` 是版式固定文字，原样保留，不被覆盖 |
+| `is_filler()` | 识别中英占位符（`此处`、`添加标题`、`Your title here`、`CONTENT TITLE`、`Click to add…`），清掉但不留洞 |
+| `pick_headline()` | 封面/结尾这类居中版式按页面水平中心取标题；年份只写进放得下 4 个字的框 |
+| `fit_font()` | 按框的真实可用行数缩字号，缩到下限仍放不下就换一个框 |
+| `paint_behind()` | 判断文字背后是什么颜色（含渐变、图片），自动换黑/白字，保住可读性 |
+| 拥挤/强制放置 | 短句进矮框不算挤；整页候选全挤时强制放置——宁可紧一点，也不交空白页 |
+| `strip_effects()` | 保存前清掉 `p:transition`、`p:timing`、音频视频关系：产出无切换无声音 |
+
+## 目录结构
+
+```
+pptl.py                 引擎（index / slots / fill / library）
+tools/import_decks.py   模板入库 + 目录重建
+tools/export_manifest.py 导出 manifest.json（只含元数据，可提交进 git）
+SKILL.md                DeepSeek Harness 技能定义
+docs/plan-schema.md     plan.json 字段说明
+examples/plan-demo.json 可直接跑的示例
+manifest.json           模板库清单（可选，向你自己的库导出）
+library/                你的模板库（.gitignore，不入库）
+```
+
+## 可移植性
+
+库位置解析顺序：`--library` 参数 → 环境变量 `PPTL_LIB` → 仓库旁边 `./library`。
+
+```bash
+export PPTL_LIB=/data/ppt-library     # 库放别处
+python pptl.py library
+```
+
+## 已知边界
+
+- 有些模板的正文槽只有 8–10pt（五边形/图片卡片的说明位）：这类页只当装饰页，别放段落
+- "单框多段 + 独立圆号"的列表页暂不支持整行删除，出稿避开
+- 模板 LOGO / 母版装饰属于版式图层，脚本读不到幻灯片上的文本，可能残留（需在母版里处理）
+- 中文字体缺失会被替换，字形可能和模板原设计不同；把模板用到的字体装到出稿机器上更稳
+
+## License
+
+引擎与脚本：MIT（见 [LICENSE](LICENSE)）。
+**模板文件不属于本仓库**，其版权归各自作者；把模板公开分发前请自行确认授权，见 [PUBLISH.md](PUBLISH.md)。

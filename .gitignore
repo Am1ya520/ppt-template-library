@@ -1,0 +1,17 @@
+# template library: gigabytes of user-owned .pptx — never commit
+library/
+out/
+*qa/
+_render/
+*.pptx
+~$*
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# os noise
+.DS_Store
+Thumbs.db
