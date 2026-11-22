@@ -1,4 +1,5 @@
 param(
+    [string]$Owner = "Am1ya520",
     [string]$RepoName = "ppt-template-library",
     [string]$Tag = "v1.0.0",
     [string]$Asset = "dist/ppt-templates.zip",
@@ -29,6 +30,7 @@ Ok "gh 已登录"
 $user = gh api user --jq .login
 if ($LASTEXITCODE -ne 0 -or -not $user) { Fail "拿不到 GitHub 用户名，检查网络。" }
 Ok "账号：$user"
+if ($Owner -and $user -ne $Owner) { Write-Host "⚠ 当前登录的是 $user，不是 $Owner；产物会落在 $user 名下。" -ForegroundColor Yellow }
 
 if (-not $SkipPush) {
     $hasRemote = (git remote) -contains "origin"

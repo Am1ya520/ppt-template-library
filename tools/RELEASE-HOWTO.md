@@ -1,5 +1,7 @@
 # 一条命令发布（需要能访问 GitHub 的网络）
 
+目标仓库：<https://github.com/Am1ya520/ppt-template-library>
+
 在这个仓库目录里执行：
 
 ```powershell

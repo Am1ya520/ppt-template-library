@@ -1,5 +1,7 @@
 # ppt-template-library
 
+> 仓库：<https://github.com/Am1ya520/ppt-template-library>　成品模板包：<https://github.com/Am1ya520/ppt-template-library/releases>
+
 **用你自己的 PPT 模板出稿，而不是让 AI 从白纸画版式。**
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai) 用的技能 + 独立 CLI：它把你硬盘里的一堆 `.pptx` 模板编成索引，
