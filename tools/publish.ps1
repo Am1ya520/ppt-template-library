@@ -35,8 +35,12 @@ if ($Owner -and $user -ne $Owner) { Write-Host "⚠ 当前登录的是 $user，�
 if (-not $SkipPush) {
     $hasRemote = (git remote) -contains "origin"
     if (-not $hasRemote) {
-        $exists = gh repo view "$user/$RepoName" 2>$null
-        if ($LASTEXITCODE -ne 0) {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        gh repo view "$user/$RepoName" *> $null
+        $exists = ($LASTEXITCODE -eq 0)
+        $ErrorActionPreference = $prev
+        if (-not $exists) {
             gh repo create "$user/$RepoName" --$Visibility --source=. --remote=origin --push
             if ($LASTEXITCODE -ne 0) { Fail "建仓库失败（多半是网络）。" }
             Ok "仓库已建并推送：https://github.com/$user/$RepoName"
