@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import math
 import re
 from dataclasses import dataclass, field
@@ -199,9 +198,17 @@ class ShapeInfo:
         }
 
 
+def _safe_shape_type(shape):
+    """shape_type raises on some legacy/converted shapes; treat them as opaque."""
+    try:
+        return shape.shape_type
+    except Exception:
+        return None
+
+
 def _iter_text_shapes(shapes):
     for shape in shapes:
-        if shape.shape_type == 6:  # group
+        if _safe_shape_type(shape) == 6:  # group
             yield from _iter_text_shapes(shape.shapes)
             continue
         if not shape.has_text_frame:
@@ -231,7 +238,7 @@ def read_shapes(slide) -> list[ShapeInfo]:
             ShapeInfo(
                 shape_id=shape.shape_id,
                 name=shape.name,
-                kind=str(shape.shape_type).split(" ")[0] if shape.shape_type else "TEXT",
+                kind=str(_safe_shape_type(shape)).split(" ")[0] if _safe_shape_type(shape) else "TEXT",
                 placeholder=str(ph).split(" ")[0].split(".")[-1] if ph else None,
                 left=emu2pt(shape.left),
                 top=emu2pt(shape.top),
@@ -1140,37 +1147,6 @@ def cmd_slots(args) -> int:
     return 0
 
 
-def library_root(explicit: str | None = None) -> Path:
-    """Where the deck library lives.
-
-    Order: --library flag > $PPTL_LIB > ./library next to this script.
-    """
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    env = os.environ.get("PPTL_LIB")
-    if env:
-        return Path(env).expanduser().resolve()
-    return (Path(__file__).resolve().parent / "library").resolve()
-
-
-def cmd_library(args) -> int:
-    root = library_root(getattr(args, "library", None))
-    catalog = root / "catalog.json"
-    if not catalog.exists():
-        print(f"no catalog at {catalog}\nrun: python tools/import_decks.py <folder-with-pptx>")
-        return 1
-    decks = json.loads(catalog.read_text(encoding="utf-8"))["decks"]
-    decks.sort(key=lambda m: -len(m.get("readable_pages") or []))
-    print(f"{len(decks)} decks in {root}\n")
-    print(f"{'id':<8}{'pages':>6}{'usable':>8}  {'fill':>5}  name")
-    for m in decks[: args.limit]:
-        print(
-            f"{m['deck_id']:<8}{m['slides']:>6}{len(m.get('readable_pages') or []):>8}"
-            f"  {m.get('fillability_overall', 0):>5.2f}  {m['source_name'][:60]}"
-        )
-    return 0
-
-
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="pptl")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1185,11 +1161,6 @@ def main(argv=None) -> int:
     p.add_argument("plan")
     p.add_argument("-o", "--out")
     p.set_defaults(func=cmd_fill)
-
-    p = sub.add_parser("library")
-    p.add_argument("--library")
-    p.add_argument("--limit", type=int, default=40)
-    p.set_defaults(func=cmd_library)
 
     p = sub.add_parser("slots")
     p.add_argument("source")
