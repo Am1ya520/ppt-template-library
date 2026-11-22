@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import math
 import re
 from dataclasses import dataclass, field
@@ -1000,6 +1001,50 @@ def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict,
     return report
 
 
+def library_root(explicit: str | None = None) -> Path:
+    """Library root: --library / $PPTL_LIB / ./library beside this script."""
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    env = os.environ.get("PPTL_LIB")
+    if env:
+        return Path(env).expanduser().resolve()
+    return Path(__file__).resolve().parent / "library"
+
+
+def cmd_library(args) -> int:
+    root = library_root(args.library)
+    if not root.is_dir():
+        print(f"library not found: {root}")
+        print("build one first:  python tools/import_decks.py \"<模板目录>\" [--library DIR]")
+        return 2
+    rows = []
+    for deck in sorted(root.glob("deck*")):
+        meta_path = deck / "meta.json"
+        if not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if args.scenario and meta.get("scenario") != args.scenario:
+            continue
+        rows.append((len(meta.get("readable_pages") or []), meta))
+    if not rows:
+        print(f"no decks with meta.json under {root}")
+        return 1
+    rows.sort(key=lambda r: (-r[0], r[1].get("deck_id", "")))
+    shown = rows[: args.limit] if args.limit else rows
+    print(f"{'deck':<8}{'改页':>5}{'页数':>5}  {'场景':<10}模板")
+    for readable, meta in shown:
+        print(
+            f"{meta.get('deck_id',''):<8}{readable:>5}"
+            f"{meta.get('slides',0):>5}  {str(meta.get('scenario','')):<10}"
+            f"{meta.get('source_name','')}"
+        )
+    print(f"\n{len(rows)} decks in {root}  (showing {len(shown)})")
+    return 0
+
+
 def cmd_fill(args) -> int:
     src = Path(args.source).resolve()
     plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
@@ -1166,6 +1211,12 @@ def main(argv=None) -> int:
     p.add_argument("source")
     p.add_argument("--slide", type=int)
     p.set_defaults(func=cmd_slots)
+
+    p = sub.add_parser("library")
+    p.add_argument("--library", help="library root (default: $PPTL_LIB or ./library)")
+    p.add_argument("--limit", type=int, default=0, help="only the best N decks")
+    p.add_argument("--scenario", help="filter by scenario")
+    p.set_defaults(func=cmd_library)
 
     args = ap.parse_args(argv)
     return args.func(args)

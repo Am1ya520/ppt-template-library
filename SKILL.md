@@ -11,13 +11,20 @@ description: 用本地自建模板库出稿：复制模板原有页面、只替�
 
 ## 0. 先确认库在哪
 
-库位置解析顺序：`--library` 参数 → 环境变量 `PPTL_LIB` → 技能/仓库旁边的 `library/`。
+下文 `<skill>` = 本技能所在目录（就是含 `SKILL.md` 的这个文件夹）。
+
+库位置解析顺序：`--library` 参数 → 环境变量 `PPTL_LIB` → `<skill>/library`。
 
 ```bash
-python <repo>/pptl.py library            # 列库：按"可改页"排序
+python <skill>/pptl.py library           # 列库：按"可改页"排序
 ```
 
-如果是空的，说明还没入库，走第 4 节。
+如果报 `library not found` 或列表为空，说明还没入库，走第 4 节；模板多时把库放到别的盘：
+
+```bash
+setx PPTL_LIB "F:\pptl-lib"        # Windows，之后重启终端
+export PPTL_LIB="$HOME/pptl-lib"    # macOS / Linux
+```
 
 ## 1. 挑模板
 
@@ -26,7 +33,7 @@ python <repo>/pptl.py library            # 列库：按"可改页"排序
 2. 读该套 `library/deckNN/meta.json`：
    - `readable_pages`：能放正文的页码（正文槽 ≥18pt、≥3 个文本框）
    - `best_pages`：按可填充度排的推荐页
-3. 需要精确槽位时读 `index.json` 或 `python <repo>/pptl.py slots <pptx> --slide N`。
+3. 需要精确槽位时读 `index.json` 或 `python <skill>/pptl.py slots <pptx> --slide N`。
 
 ## 2. 写 plan.json
 
@@ -49,10 +56,16 @@ python <repo>/pptl.py library            # 列库：按"可改页"排序
 ## 3. 填充并检查
 
 ```bash
-python <repo>/pptl.py fill "library/deckNN/source.pptx" plan.json -o out/x.pptx
+python <skill>/pptl.py fill "<library>/deckNN/source.pptx" plan.json -o out/x.pptx
 ```
 
-**必须逐页看渲染**：转成 PNG 后一页页看，重点检查——
+先跑静态质检（**0 error 才能交付**）：
+
+```bash
+python <skill>/tools/qa_deck.py out/x.pptx
+```
+
+再逐页看渲染：转成 PNG 后一页页看，重点检查——
 
 - [ ] 文字都在模板原有文字框里，没有新画的形状
 - [ ] 没有残留 `Your title here` / `添加标题` / `Lorem`
@@ -65,10 +78,17 @@ python <repo>/pptl.py fill "library/deckNN/source.pptx" plan.json -o out/x.pptx
 ## 4. 追加模板
 
 ```bash
-python <repo>/tools/import_decks.py "D:/我的模板"        # 目录或文件，可多个
+python <skill>/tools/import_decks.py "D:/我的模板"        # 目录或文件，可多个
 ```
 
 自动去重（大小 + 首尾 1MB 哈希）、自动续编号、重写 `catalog.md`。
+
+老式二进制 `.ppt` 引擎读不了，先批量转换（需装 LibreOffice）：
+
+```bash
+soffice --headless --convert-to pptx --outdir conv "D:/我的模板/老模板.ppt"
+python <skill>/tools/import_decks.py conv
+```
 
 ## 5. 交付时说明什么
 

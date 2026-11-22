@@ -23,28 +23,55 @@
 | 让 AI 生成 HTML/图片式的"设计稿" | 看着花，但不是能改的 PPT |
 | **复制模板真实页面，只换字**（本仓库） | 和模板原样一致，客户/评委看不出是生成的 |
 
-## 安装
+## 安装（三条命令）
 
 ```bash
-git clone https://github.com/<you>/ppt-template-library.git
+git clone https://github.com/Am1ya520/ppt-template-library.git
 cd ppt-template-library
-pip install python-pptx          # 唯一依赖
+pip install -r requirements.txt          # 只有 python-pptx + lxml
+python tools/bootstrap.py "D:/我的模板"    # 检查环境 + 建库 + 把模板全部入库（可反复跑，自动去重）
 ```
+
+`bootstrap.py` 不带参数只检查环境；跑完会打印接下来要用的命令。
 
 ### 作为 DeepSeek Harness 技能使用
 
-把仓库（或其中的 `SKILL.md`）放到 DSH 的 skills 目录，之后任何对话里提到"做 PPT / 幻灯片 / 汇报"就会自动加载：
+技能就是本仓库的 `SKILL.md`。放进 DSH 的 skills 目录后，任何对话里说"做个 PPT / 幻灯片 / 汇报"就会自动加载：
+
+```bash
+# Windows (PowerShell)
+git clone https://github.com/Am1ya520/ppt-template-library.git "$env:USERPROFILE\.dsh\skills\ppt-template-library"
+# macOS / Linux
+git clone https://github.com/Am1ya520/ppt-template-library.git ~/.dsh/skills/ppt-template-library
+```
+
+装完**重启 DSH**（或新开一个会话）才会出现在技能列表里。
+
+### 库很大？放到别的盘
+
+仓库里不放模板。默认库是仓库内的 `library/`；模板多（几个 GB 以上）时建议放独立目录，用环境变量指过去，技能和 CLI 都会跟着用：
 
 ```bash
 # Windows
-xcopy /E /I ppt-template-library "%USERPROFILE%\.dsh\skills\ppt-template-library"
+setx PPTL_LIB "F:\pptl-lib"
 # macOS / Linux
-cp -r ppt-template-library ~/.dsh/skills/ppt-template-library
+export PPTL_LIB="$HOME/pptl-lib"      # 写进 ~/.zshrc 或 ~/.bashrc
+```
+
+也可以每次显式传 `--library D:/pptl-lib`。
+
+### 手上没有模板？
+
+[Releases](https://github.com/Am1ya520/ppt-template-library/releases) 里有整理好的通用模板包（年终总结、财务报告、商务策划、创业 BP、公司简介、企业培训、毕业答辩等 28 套），下载解压后：
+
+```bash
+python tools/import_decks.py "解压出来的目录"      # 一次性全部入库
 ```
 
 ### 作为普通 CLI 使用
 
 ```bash
+python pptl.py library --limit 20      # 按"可改页"排序看库
 python pptl.py --help
 ```
 
