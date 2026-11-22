@@ -170,6 +170,10 @@ library/                你的模板库（.gitignore，不入库）
 
 ## 可移植性
 
+- **Python 3.9+**（开发与实测环境 3.12），只依赖 `python-pptx` + `lxml`，无其他服务
+- Windows / macOS / Linux 都能跑（路径全部走 `pathlib`）；`.ppt` 老格式需要本机装 LibreOffice 做一次转换
+- 全新机器实测流程：`git clone` → `pip install -r requirements.txt` → `tools/bootstrap.py` → `import_decks.py` → `pptl.py fill` → `qa_deck.py`，全程 5 分钟，无需任何配置
+
 库位置解析顺序：`--library` 参数 → 环境变量 `PPTL_LIB` → 仓库旁边 `./library`。
 
 ```bash
