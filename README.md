@@ -10,7 +10,7 @@
 - 引擎只依赖 `python-pptx`，单文件 `pptl.py`
 - 一份 deck 只用一套模板（混用会立刻回到 AI 感）
 - 产出一律**没有切换动画、没有声音**
-- 附带一个索引/套壳工具链：`index`（逐页槽位）→ `fill`（套内容）→ `catalog`（库总表）
+- 附带一个索引/套壳工具链：`index`（逐页槽位）→ `fill`（套内容）→ `qa_deck`（交付前静态质检） → `catalog`（库总表）
 
 > 本仓库不含任何模板文件。模板是你自己的资产，通过 `tools/import_decks.py` 从本地目录入库；
 > 想把模板也分发出去，见 [PUBLISH.md](PUBLISH.md)。
