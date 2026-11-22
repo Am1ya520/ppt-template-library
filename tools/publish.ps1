@@ -29,7 +29,8 @@ Ok "gh 已登录"
 
 $user = gh api user --jq .login
 if ($LASTEXITCODE -ne 0 -or -not $user) { Fail "拿不到 GitHub 用户名，检查网络。" }
-Ok "账号：$user"
+gh auth setup-git 2>$null | Out-Null
+Ok "账号：$user（已配置 git 凭据）"
 if ($Owner -and $user -ne $Owner) { Write-Host "⚠ 当前登录的是 $user，不是 $Owner；产物会落在 $user 名下。" -ForegroundColor Yellow }
 
 if (-not $SkipPush) {
@@ -63,9 +64,9 @@ if (-not $SkipRelease) {
     Write-Host "上传 $Asset ($sizeMb MB)..." -ForegroundColor Yellow
     git tag $Tag 2>$null
     git push origin $Tag 2>$null
-    gh release create $Tag $Asset `
-        --title "v1.0.0 · 18 套成品模板" `
-        --notes "18 套精选 PPT 模板（可直接被 pptl.py 套壳）：汇报 / 商业计划书 / 公司简介 / 培训 / 财务 / 互联网 / 学术答辩 / 中国风 / 简约商务。解压后 `python tools/import_decks.py <目录>` 即可入库。模板版权归原作者，仅供个人学习研究，请勿商用再分发。"
+    $notes = "dist/RELEASE_NOTES.md"
+    if (-not (Test-Path $notes)) { Fail "缺少 $notes（Release 说明），不要用内联字符串——PowerShell/ bash 都会吃掉反引号和尖括号。" }
+    gh release create $Tag $Asset --title "$Tag · 18 套成品模板" --notes-file $notes
     if ($LASTEXITCODE -ne 0) { Fail "Release 上传失败。" }
     Ok "Release 已发布：https://github.com/$user/$RepoName/releases/tag/$Tag"
 }
