@@ -39,6 +39,7 @@ def library_root(explicit: str | None) -> Path:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="bootstrap")
+    ap.add_argument("paths", nargs="*", help="模板文件或目录（可多个，等价于 --templates）")
     ap.add_argument("--templates", nargs="*", help="模板文件或目录（可多个）")
     ap.add_argument("--library", help="库位置（默认 $PPTL_LIB 或仓库内 ./library）")
     args = ap.parse_args(argv)
@@ -52,9 +53,10 @@ def main(argv=None) -> int:
     if not ok:
         return 2
 
-    if args.templates:
+    inputs = (args.templates or []) + args.paths
+    if inputs:
         rc = subprocess.run(
-            [sys.executable, str(REPO / "tools" / "import_decks.py"), *args.templates, "--library", str(lib)]
+            [sys.executable, str(REPO / "tools" / "import_decks.py"), *inputs, "--library", str(lib)]
         )
         if rc.returncode != 0:
             return rc.returncode
