@@ -54,6 +54,57 @@ def overlap_area(a, b) -> float:
     return w * h if w > 0 and h > 0 else 0.0
 
 
+def _walk(shapes):
+    """yield every shape, descending into groups"""
+    for sh in shapes:
+        yield sh
+        if sh.shape_type is not None and int(sh.shape_type) == 6:
+            yield from _walk(sh.shapes)
+
+
+def _walk_abs(shapes, ox=0.0, oy=0.0, sx=1.0, sy=1.0):
+    """yield (shape, x0, y0, x1, y1) in absolute slide points, composing group transforms"""
+    for sh in shapes:
+        try:
+            l, t_ = pt(sh.left), pt(sh.top)
+            w, h = pt(sh.width), pt(sh.height)
+        except Exception:
+            l = t_ = w = h = 0.0
+        x0, y0 = ox + l * sx, oy + t_ * sy
+        x1, y1 = x0 + w * sx, y0 + h * sy
+        yield sh, x0, y0, x1, y1
+        try:
+            is_group = sh.shape_type is not None and int(sh.shape_type) == 6
+        except Exception:
+            is_group = False
+        if is_group:
+            # child offsets are in child space; map them into the parent's box
+            ch_off_x = ch_off_y = ch_ext_x = ch_ext_y = 0.0
+            for el in sh._element.iter():
+                tag = el.tag.split("}")[-1]
+                if tag == "chOff":
+                    ch_off_x, ch_off_y = int(el.get("x") or 0) / 12700.0, int(el.get("y") or 0) / 12700.0
+                elif tag == "chExt":
+                    ch_ext_x, ch_ext_y = int(el.get("cx") or 0) / 12700.0, int(el.get("cy") or 0) / 12700.0
+            gx = sx * (w / ch_ext_x) if ch_ext_x else sx
+            gy = sy * (h / ch_ext_y) if ch_ext_y else sy
+            yield from _walk_abs(sh.shapes,
+                                 ox + (l - ch_off_x) * sx,
+                                 oy + (t_ - ch_off_y) * sy,
+                                 gx, gy)
+
+
+def _uniq(shapes):
+    """dedupe by xml element so a nested group is not counted twice"""
+    seen = set()
+    for sh in shapes:
+        key = id(sh._element)
+        if key in seen:
+            continue
+        seen.add(key)
+        yield sh
+
+
 def audit(path: Path) -> dict:
     prs = Presentation(str(path))
     slide_w, slide_h = pt(prs.slide_width), pt(prs.slide_height)
@@ -61,13 +112,16 @@ def audit(path: Path) -> dict:
     for index, slide in enumerate(prs.slides, 1):
         texts = []
         findings = []
-        for shape in slide.shapes:
+        seen = set()
+        for shape, x0, y0, x1, y1 in _walk_abs(slide.shapes):
+            if id(shape._element) in seen:
+                continue
+            seen.add(id(shape._element))
             if not getattr(shape, "has_text_frame", False):
                 continue
             content = shape.text_frame.text.strip()
             if not content:
                 continue
-            x0, y0, x1, y1 = box(shape)
             w, h = x1 - x0, y1 - y0
             em, size = text_need(shape)
             texts.append({"name": shape.name, "box": [x0, y0, x1, y1],
@@ -96,6 +150,13 @@ def audit(path: Path) -> dict:
                 if not inter:
                     continue
                 small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+                if texts[i]["name"] == texts[j]["name"] and a == b:
+                    continue
+                import re as _re
+                if _re.match(r"^(PART|PARTE)\s*\d+$", texts[i]["text"].strip(), _re.I) or \
+                   _re.match(r"^(PART|PARTE)\s*\d+$", texts[j]["text"].strip(), _re.I):
+                    # chapter dividers overlay the big "PART 0x" marker by design
+                    continue
                 if small > 0 and inter / small > 0.25:
                     findings.append(("ERROR", "collide",
                                      f"{texts[i]['name']} 与 {texts[j]['name']} 文字区重叠 "
