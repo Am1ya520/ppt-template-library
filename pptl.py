@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import math
 import re
 from dataclasses import dataclass, field
@@ -35,6 +34,7 @@ CHAPTER_RE = re.compile(r"^\s*(part|chapter|第[一二三四五六七八九十0-
 YEAR_RE = re.compile(r"^\s*(19|20)\d{2}\s*$|^\s*(19|20)\d[Xx]\s*$")
 NUM_RE = re.compile(r"^\s*\d{1,3}\s*$")
 DESIGN_RE = re.compile(r"^\s*(contents?|agenda|part\s*[\divx]+|section|chapter|\.|-)\s*$", re.I)
+LOGO_RE = re.compile(r"^\s*(logo|公司标志|企业标识|公司logo)\s*$", re.I)
 FURNITURE_RE = re.compile(
     r"^\s*(目\s*录|contents?|agenda|谢谢|感谢|thank\s*you|many\s*thanks|the\s*end|\.\.\.)\s*$",
     re.I,
@@ -302,6 +302,8 @@ def classify(slot: ShapeInfo) -> str:
         return "year"
     if NUM_RE.match(text) or DESIGN_RE.match(text):
         return "num"
+    if re.fullmatch(r"(logo|LOGO|公司标志|企业标识|公司logo)", text, re.I):
+        return "design"
     if (is_filler(text) or MARKETING_RE.search(text)) and len(text) <= 60:
         return "filler"
     if len(text) <= 3:
@@ -329,7 +331,7 @@ def pick_headline(
         return c == "text" or (c == "filler" and s.width >= 120 and s.max_pt >= 14)
 
     def score(s: ShapeInfo) -> float:
-        base = s.max_pt + min(s.area / 4000.0, 30.0) + min(len(s.text), 24) * 0.4
+        base = min(s.max_pt, 72.0) + min(s.area / 4000.0, 30.0) + min(len(s.text), 24) * 0.4
         if center is not None:
             span = max(center, 1.0)
             drift = abs((s.left + s.width / 2) - center) / span
@@ -339,6 +341,11 @@ def pick_headline(
     cands = [s for s in slots if is_cand(s)]
     if not cands:
         return None
+    # a title is set in (near) the largest type on the page; body rows with a
+    # similar score but half the size are not titles
+    top_pt = max(s.max_pt for s in cands)
+    if top_pt > 0:
+        cands = [s for s in cands if s.max_pt >= 0.75 * top_pt]
     best = max(cands, key=score)
     if prefer_top is not None:
         band = [s for s in cands if s.top <= prefer_top]
@@ -421,7 +428,7 @@ def _fill_paragraphs(tf, values: list[str]) -> None:
 
 
 def _text_width_em(text: str) -> float:
-    return sum(1.0 if ord(c) > 0x2E80 else 0.56 for c in text)
+    return sum(1.08 if ord(c) > 0x2E80 else 0.56 for c in text)
 
 
 def fit_font(tf, slot: ShapeInfo, floor: float = 0.5) -> float:
@@ -452,6 +459,25 @@ def fit_font(tf, slot: ShapeInfo, floor: float = 0.5) -> float:
         size = best
     ratio = best / slot.max_pt
     if ratio >= 0.995:
+        # short text in a big frame looks lost on airy minimal templates: grow it
+        # (never past the frame, and never past a sane reading size)
+        live = [p.text for p in tf.paragraphs if p.text.strip()]
+        if live and sum(_text_width_em(x) for x in live) <= 72:
+            widest = max(_text_width_em(x) for x in live)
+            by_w = (usable_w / widest) if widest else 0.0
+            by_h = (max(slot.height - 4, 12) / (len(live) * 1.45)) if live else 0.0
+            target = min(slot.max_pt * 1.22, by_w / 1.15, by_h, 40.0)
+            # growing must not turn one line into two: the neighbouring rows in
+            # these templates sit close together, and a wrap lands on top of them
+            if widest and target * widest * 1.15 > usable_w:
+                target = usable_w / (widest * 1.15)
+            if len(live) > 1 and target * len(live) * 1.45 > slot.height:
+                target = slot.height / (len(live) * 1.45)
+            if target > slot.max_pt * 1.15:
+                for para in tf.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(round(target, 2))
+                return target / slot.max_pt
         return 1.0
     for para in tf.paragraphs:
         for run in para.runs:
@@ -468,6 +494,32 @@ def widen_headline(shape, slot: ShapeInfo, slide_w: float, right_margin: float =
     if target > slot.width + 24:
         shape.width = Emu(int(target * 12700))
         slot.width = target
+
+
+def normalize_alignment(shape) -> None:
+    """Undo template justification/spacing that stretches short text across the box.
+
+    Templates often ship titles with algn="dist" (or large character spacing) so
+    their own long sentence fills the frame. Replace with our shorter text and the
+    letters fly apart, which reads as a layout bug.
+    """
+    ns_a = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    for para in shape.text_frame.paragraphs:
+        pPr = para._p.find(ns_a + "pPr")
+        if pPr is not None:
+            algn = (pPr.get("algn") or "").lower()
+            if algn in ("dist", "just", "justlow", "thaiDist", "thaidist"):
+                pPr.set("algn", "l")
+        for run in para.runs:
+            rPr = run._r.find(ns_a + "rPr")
+            if rPr is None:
+                continue
+            try:
+                spc = int(rPr.get("spc") or 0)
+            except ValueError:
+                spc = 0
+            if abs(spc) > 60:  # ~0.6pt per char adds up fast
+                rPr.set("spc", "0")
 
 
 def paint_text(tf, slot: ShapeInfo, values: list[str]) -> float:
@@ -669,6 +721,15 @@ def paint_behind(slide, slot: ShapeInfo, theme: dict[str, str]) -> tuple[str, fl
             return ("dark" if (lv or 0) < 0.45 else "light", lv)
     except Exception:
         pass
+    # nothing opaque sits behind the text: fall back to the slide background
+    try:
+        fill = slide.background.fill
+        if fill.type is not None and fill.type == 1:  # MSO_FILL.SOLID
+            hexc = str(fill.fore_color.rgb)
+            lv = luma(hexc)
+            return ("dark" if (lv or 0) < 0.45 else "light", lv)
+    except Exception:
+        pass
     return ("light", 0.95)
 
 
@@ -686,6 +747,27 @@ def contrast_ratio(a: str, b: str) -> float:
     return (hi + 0.05) / (lo + 0.05)
 
 
+
+def _behind_coverage(slide, slot: ShapeInfo) -> float:
+    """Largest opaque overlap fraction behind a slot (0..1)."""
+    best = 0.0
+    area = max(slot.area, 1.0)
+    for sh in slide.shapes:
+        if sh.shape_id == slot.shape_id:
+            continue
+        try:
+            left, top = emu2pt(sh.left), emu2pt(sh.top)
+            w, h = emu2pt(sh.width), emu2pt(sh.height)
+        except Exception:
+            continue
+        iw = min(left + w, slot.right) - max(left, slot.left)
+        ih = min(top + h, slot.bottom) - max(top, slot.top)
+        if iw <= 0 or ih <= 0:
+            continue
+        best = max(best, iw * ih / area)
+    return best
+
+
 def ensure_readable(tf, slot: ShapeInfo, slide, theme: dict[str, str]) -> bool:
     """Make the text visible against the paint behind it.
 
@@ -693,6 +775,18 @@ def ensure_readable(tf, slot: ShapeInfo, slide, theme: dict[str, str]) -> bool:
     (unstyled) text and clashing colours are flipped to dark or white.
     """
     behind, bg_luma = paint_behind(slide, slot, theme)
+    # only trust the probe for a shape that really covers the text; a partial
+    # overlap usually means a decorative panel, not the actual background
+    if behind in ("light", "dark") and _behind_coverage(slide, slot) < 0.85:
+        probe = "F2F2F2"
+        try:
+            if slide.background.fill.type == 1:
+                probe = str(slide.background.fill.fore_color.rgb)
+        except Exception:
+            pass
+        explicit0 = [h for h in (color_hex(c, theme) for c in slot.colors) if h]
+        if explicit0 and all(contrast_ratio(h, probe) >= 3.0 for h in explicit0):
+            return False
     if behind == "photo":
         # dark lettering over a photo nearly always disappears; lift it to white
         dark = [h for h in (color_hex(c, theme) for c in slot.colors) if h and (luma(h) or 1) < 0.45]
@@ -702,8 +796,27 @@ def ensure_readable(tf, slot: ShapeInfo, slide, theme: dict[str, str]) -> bool:
             for run in para.runs:
                 run.font.color.rgb = RGBColor.from_string(WHITE_TEXT)
         return True
+    # unknown (picture / inherited) background: a template that already set light
+    # lettering knows its own plate; do not flip it to dark
+    try:
+        bg_solid = slide.background.fill.type == 1
+    except Exception:
+        bg_solid = False
+    if not bg_solid:
+        light_text = [h for h in (color_hex(c, theme) for c in slot.colors) if h and contrast_ratio(h, "000000") >= 3.0]
+        if light_text:
+            return False
+
     bg_hex = "F2F2F2" if behind == "light" else "1A1A1A"
     want = DARK_TEXT if behind == "light" else WHITE_TEXT
+    # a dark deck must never receive dark lettering, whatever the local probe says
+    try:
+        bg_fill = slide.background.fill
+        if bg_fill.type == 1:
+            bl = luma(str(bg_fill.fore_color.rgb)) or 0.5
+            want = WHITE_TEXT if bl < 0.45 else DARK_TEXT
+    except Exception:
+        pass
     explicit = [h for h in (color_hex(c, theme) for c in slot.colors) if h]
     if explicit and all(contrast_ratio(h, bg_hex) >= 3.0 for h in explicit):
         return False
@@ -736,6 +849,10 @@ def slot_usable(slide, slot: ShapeInfo, theme: dict[str, str]) -> bool:
     if abs(slot.rot) > 2:
         return False
     if slot.area < 2200 or slot.height < 20 or slot.width < 120:
+        return False
+    if slot.max_pt and slot.max_pt < 10.5:
+        # 6-9pt template labels are captions under icons; body text there reads
+        # as a defect no matter how well it fits
         return False
     if title_capacity(slot, 0.8) < 12:
         return False
@@ -781,8 +898,12 @@ def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict,
         slot = next((s for s in slots if s.shape_id == sid), None)
         if slot is None:
             continue
+        if ptype == "cover" and slot.max_pt >= 40 and slot.width < 420:
+            widen_headline(shape, slot, emu2pt(slide.part.package.presentation_part.presentation.slide_width))
+            slot.width = emu2pt(shape.width)
+            slot.left = emu2pt(shape.left)
         paint_text(shape.text_frame, slot, value if isinstance(value, list) else [value])
-        if ensure_readable(shape.text_frame, slot, slide, theme):
+        if ptype not in ("cover", "ending") and ensure_readable(shape.text_frame, slot, slide, theme):
             report["recolored"] += 1
         used.add(sid)
 
@@ -802,15 +923,20 @@ def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict,
     )
     # rotated / decorative placeholders must not survive into the output
     for slot in roles.get("rotated", []) + roles.get("design", []):
-        if slot.shape_id in shapes and is_filler(slot.text or ""):
+        if slot.shape_id not in shapes:
+            continue
+        if is_filler(slot.text or "") or LOGO_RE.match(slot.text or ""):
             blank(shapes[slot.shape_id])
             report["blanked"] += 1
 
     if title and headline is not None and not has_furniture:
-        if ptype in ("cover", "chapter", "content", "dense", "ending"):
+        if ptype in ("cover", "content", "dense", "ending"):
             widen_headline(shapes[headline.shape_id], headline, slide_w)
         paint_text(shapes[headline.shape_id].text_frame, headline, [title])
-        if ensure_readable(shapes[headline.shape_id].text_frame, headline, slide, theme):
+        normalize_alignment(shapes[headline.shape_id])
+        if ptype not in ("cover", "ending") and ensure_readable(
+            shapes[headline.shape_id].text_frame, headline, slide, theme
+        ):
             report["recolored"] += 1
         used.add(headline.shape_id)
         report["headline"] = f"#{headline.shape_id} {headline.name} {headline.max_pt}pt"
@@ -1001,50 +1127,6 @@ def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict,
     return report
 
 
-def library_root(explicit: str | None = None) -> Path:
-    """Library root: --library / $PPTL_LIB / ./library beside this script."""
-    if explicit:
-        return Path(explicit).expanduser().resolve()
-    env = os.environ.get("PPTL_LIB")
-    if env:
-        return Path(env).expanduser().resolve()
-    return Path(__file__).resolve().parent / "library"
-
-
-def cmd_library(args) -> int:
-    root = library_root(args.library)
-    if not root.is_dir():
-        print(f"library not found: {root}")
-        print("build one first:  python tools/import_decks.py \"<模板目录>\" [--library DIR]")
-        return 2
-    rows = []
-    for deck in sorted(root.glob("deck*")):
-        meta_path = deck / "meta.json"
-        if not meta_path.exists():
-            continue
-        try:
-            meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if args.scenario and meta.get("scenario") != args.scenario:
-            continue
-        rows.append((len(meta.get("readable_pages") or []), meta))
-    if not rows:
-        print(f"no decks with meta.json under {root}")
-        return 1
-    rows.sort(key=lambda r: (-r[0], r[1].get("deck_id", "")))
-    shown = rows[: args.limit] if args.limit else rows
-    print(f"{'deck':<8}{'改页':>5}{'页数':>5}  {'场景':<10}模板")
-    for readable, meta in shown:
-        print(
-            f"{meta.get('deck_id',''):<8}{readable:>5}"
-            f"{meta.get('slides',0):>5}  {str(meta.get('scenario','')):<10}"
-            f"{meta.get('source_name','')}"
-        )
-    print(f"\n{len(rows)} decks in {root}  (showing {len(shown)})")
-    return 0
-
-
 def cmd_fill(args) -> int:
     src = Path(args.source).resolve()
     plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
@@ -1211,12 +1293,6 @@ def main(argv=None) -> int:
     p.add_argument("source")
     p.add_argument("--slide", type=int)
     p.set_defaults(func=cmd_slots)
-
-    p = sub.add_parser("library")
-    p.add_argument("--library", help="library root (default: $PPTL_LIB or ./library)")
-    p.add_argument("--limit", type=int, default=0, help="only the best N decks")
-    p.add_argument("--scenario", help="filter by scenario")
-    p.set_defaults(func=cmd_library)
 
     args = ap.parse_args(argv)
     return args.func(args)
