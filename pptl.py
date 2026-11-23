@@ -509,7 +509,9 @@ def normalize_alignment(shape) -> None:
         if pPr is not None:
             algn = (pPr.get("algn") or "").lower()
             if algn in ("dist", "just", "justlow", "thaiDist", "thaidist"):
-                pPr.set("algn", "l")
+                # "distributed" text is meant to span the frame; our shorter line
+                # should sit centred in it rather than jammed to the left edge
+                pPr.set("algn", "ctr")
         for run in para.runs:
             rPr = run._r.find(ns_a + "rPr")
             if rPr is None:
@@ -520,6 +522,75 @@ def normalize_alignment(shape) -> None:
                 spc = 0
             if abs(spc) > 60:  # ~0.6pt per char adds up fast
                 rPr.set("spc", "0")
+
+
+
+def stabilize_text(shape) -> None:
+    """Keep our text inside the frame the template drew.
+
+    Templates rely on "shrink on overflow" and wrap settings; after a shorter or
+    longer line is poured in, PowerPoint re-lays the box and the text drifts out
+    of its plate. Pinning wrap on and autofit off keeps it where the designer put
+    it.
+    """
+    try:
+        tf = shape.text_frame
+    except Exception:
+        return
+    try:
+        tf.word_wrap = True
+    except Exception:
+        pass
+    try:
+        from pptx.enum.text import MSO_AUTO_SIZE
+        tf.auto_size = MSO_AUTO_SIZE.NONE
+    except Exception:
+        pass
+
+
+
+def fit_to_plate(shape, slot: ShapeInfo, slide) -> None:
+    """Grow a narrow text frame to the plate drawn behind it.
+
+    Templates often put the text box inside a much wider bar or card. Our line is
+    then centred in the small box, wraps early and looks shifted off the bar.
+    """
+    best = None
+    for sh in slide.shapes:
+        if sh.shape_id == slot.shape_id:
+            continue
+        try:
+            left, top = emu2pt(sh.left), emu2pt(sh.top)
+            w, h = emu2pt(sh.width), emu2pt(sh.height)
+        except Exception:
+            continue
+        if w < slot.width * 1.3 or h < slot.height * 0.8:
+            continue
+        # only single-line bands, not cards that hold several text lines
+        if h > slot.height * 2.4:
+            continue
+        # the slot must sit inside the plate
+        if slot.left < left - 2 or slot.right > left + w + 2:
+            continue
+        if slot.top < top - 2 or slot.bottom > top + h + 2:
+            continue
+        kind, _ = shape_paint(sh)
+        if kind in ("solid", "gradient", "picture"):
+            if best is None or w * h > best[2] * best[3]:
+                best = (left, top, w, h)
+    if best is None:
+        return
+    left, top, w, h = best
+    inset_x = min(18.0, w * 0.06)
+    inset_y = min(6.0, h * 0.12)
+    shape.left = Pt(left + inset_x)
+    shape.width = Pt(w - 2 * inset_x)
+    shape.top = Pt(top + inset_y)
+    shape.height = Pt(h - 2 * inset_y)
+    slot.left = left + inset_x
+    slot.width = w - 2 * inset_x
+    slot.top = top + inset_y
+    slot.height = h - 2 * inset_y
 
 
 def paint_text(tf, slot: ShapeInfo, values: list[str]) -> float:
@@ -875,12 +946,40 @@ def page_score(slide, slots: list[ShapeInfo], theme: dict[str, str], ptype: str)
         and (headline is None or not s.overlaps(headline, pad=-4))
     ]
     rotated = len([s for s in slots if abs(s.rot) > 2])
+    complexity = page_complexity(slide)
     return {
         "headline": headline,
         "body_slots": len(usable),
         "rotated": rotated,
-        "score": len(usable) * 2 + (3 if headline is not None else 0) - rotated * 2,
+        "complexity": complexity,
+        "score": len(usable) * 2 + (3 if headline is not None else 0) - rotated * 2
+        + min(complexity, 14),
     }
+
+
+def page_complexity(slide) -> float:
+    """Rough visual richness of a page: pictures, groups, freeforms, autoshapes.
+
+    A page whose graphic is a real composition reads as designed; a page with one
+    thin rule and a title box reads as hand-made by an AI.
+    """
+    score = 0.0
+    for sh in _iter_text_shapes(slide.shapes) or []:
+        pass
+    try:
+        for sh in slide.shapes:
+            kind = _safe_shape_type(sh)
+            if kind == 13:            # PICTURE
+                score += 3.0
+            elif kind == 6:           # GROUP
+                score += 1.5
+            elif kind == 5:           # FREEFORM
+                score += 1.2
+            elif kind == 1:           # AUTO_SHAPE
+                score += 0.6
+    except Exception:
+        pass
+    return round(score, 1)
 
 
 def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict, theme: dict) -> dict:
@@ -1078,6 +1177,10 @@ def fill_page(slide, slots: list[ShapeInfo], page: dict, ptype: str, meta: dict,
                 paint_text(shapes[host.shape_id].text_frame, host, list(rest))
                 fit_font(shapes[host.shape_id].text_frame, host, floor=0.5)
                 report["filled"] += len(rest)
+
+    for sid in list(used):
+        if sid in shapes:
+            stabilize_text(shapes[sid])
 
     # a numbered/bulleted list that got fewer items than it has rows: drop the
     # spare rows instead of leaving "04 / 05" hanging with no text
